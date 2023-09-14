@@ -406,8 +406,6 @@ def grafana_create_dashboard(module, data):
 
 
 def grafana_delete_dashboard(module, data):
-
-    # define http headers
     headers = grafana_headers(module, data)
 
     grafana_version = get_grafana_version(module, data['url'], headers)
@@ -417,11 +415,35 @@ def grafana_delete_dashboard(module, data):
         else:
             raise GrafanaMalformedJson('No slug parameter. Needed with grafana < 5')
     else:
+        if data.get('uid') is None and data.get('dashboard_title_for_delete') is None:
+            raise GrafanaDeleteException('No uid or dashboard_title_for_delete specified')
+        
         if data.get('uid'):
             uid = data['uid']
-        else:
-            raise GrafanaDeleteException('No uid specified %s')
+        
+        if data.get('dashboard_title_for_delete'):
+            # force to only look in default folder
+            dashboard_exists, dashboard = grafana_dashboard_search(
+                module, data['url'], 0, data['dashboard_title_for_delete'], headers=headers)
+            if dashboard_exists == True:
+                module.warn("Dashboard found exists by title %s %s uid: %s" % (data['dashboard_title_for_delete'], dashboard_exists, dashboard.get('dashboard', {}).get('uid')))
+                uid = dashboard.get('dashboard', {}).get('uid')
+            else:
+                module.warn("No dashboard found %s" % dashboard)
+                module.warn("No dashboard exists by title %s %s uid: %s" % (data['dashboard_title_for_delete'], dashboard_exists, None))
+                uid = None
+                # dashboard does not exist, do nothing
+                result = {'msg': "Dashboard %s does not exist." % uid,
+                        'changed': False,
+                        'uid': uid}
+        
 
+    if uid is None or dashboard_exists is None:
+        module.warn("The dashboard was not found so continuing %s" % dashboard)
+        result = {'msg': "Dashboard %s does not exist." % uid,
+                        'changed': False,
+                        'uid': uid}
+        
     # test if dashboard already exists
     dashboard_exists, dashboard = grafana_dashboard_exists(module, data['url'], uid, headers=headers)
 
@@ -500,6 +522,7 @@ def main():
         commit_message=dict(type='str', aliases=['message'],
                             deprecated_aliases=[dict(name='message',
                                                      version='2.0.0', collection_name="community.grafana")]),
+        dashboard_title_for_delete=dict(type='str')
     )
     module = AnsibleModule(
         argument_spec=argument_spec,
